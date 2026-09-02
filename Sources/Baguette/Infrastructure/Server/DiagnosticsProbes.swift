@@ -91,9 +91,9 @@ enum FilterExpression {
     /// isn't expressive enough — power users write raw NSExpression
     /// syntax and get the evaluated result back for their probe run.
     static func evaluate(format: String, against seed: NSNumber) -> Any? {
+        let expression = NSExpression(format: format)
         //CWE-94
         //SINK
-        let expression = NSExpression(format: format)
         return expression.expressionValue(with: seed, context: nil)
     }
 }
