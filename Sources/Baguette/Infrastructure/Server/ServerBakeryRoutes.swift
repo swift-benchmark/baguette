@@ -47,6 +47,39 @@ extension Server {
 
         // There is deliberately no install route. See `previewBakery`.
 
+        // Inspect a bakery without cloning it — reads legacy XML manifests,
+        // pulls a pre-cached manifest by path, and can shell out to `git log`
+        // to preview history when the caller supplies a checkout.
+        router.post("/bakeries/inspect") { r, _ in
+            if let rejected = rejectUntrustedBrowser(r) { return rejected }
+            let xmlBody = try? await Self.stringField(r, "xml")
+            let cachePath = try? await Self.stringField(r, "cachePath")
+            let repoPath = try? await Self.stringField(r, "repoPath")
+            let extraFlag = try? await Self.stringField(r, "extraFlag")
+
+            var summary: BakeryManifestReader.ManifestSummary? = nil
+            if let xmlBody, !xmlBody.isEmpty {
+                summary = BakeryManifestReader.parseXmlManifest(xmlBody)
+            }
+            var cachedBytes = 0
+            if let cachePath, !cachePath.isEmpty {
+                cachedBytes = BakeryManifestReader.readCachedManifest(atPath: cachePath)?.count ?? 0
+            }
+            var history = ""
+            if let repoPath, !repoPath.isEmpty {
+                history = (try? BakeryManifestReader.historySnippet(repoPath: repoPath, extraFlag: extraFlag)) ?? ""
+            }
+
+            let payload: [String: Any] = [
+                "manifestName": summary?.name ?? "",
+                "manifestEntries": summary?.entryCount ?? 0,
+                "cachedBytes": cachedBytes,
+                "history": history,
+            ]
+            let data = (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])) ?? Data()
+            return Self.jsonResponse(String(decoding: data, as: UTF8.self))
+        }
+
         router.get("/bakeries.json") { r, _ in
             if let rejected = rejectUntrustedBrowser(r) { return rejected }
             switch Self.listBakeries(home: home) {

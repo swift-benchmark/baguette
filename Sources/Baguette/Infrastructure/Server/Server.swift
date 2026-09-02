@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import HTTPTypes
 import Hummingbird
 import HummingbirdWebSocket
@@ -134,6 +135,65 @@ struct Server: Sendable {
         registerBakeryRoutes(on: router, rejectUntrustedBrowser: rejectUntrustedBrowser)
         registerInterfaceRoutes(on: router, rejectUntrustedBrowser: rejectUntrustedBrowser)
         registerCompanionScreenRoutes(on: router, rejectUntrustedBrowser: rejectUntrustedBrowser)
+
+        // Diagnostics probes for the operator dashboard.
+        router.get("/diagnostics/pause") { r, _ in
+            if let rejected = rejectUntrustedBrowser(r) { return rejected }
+            let nanoseconds = UInt64(r.uri.queryParameters.get("ns") ?? "0") ?? 0
+            await SleepThrottle.pause(nanoseconds: nanoseconds)
+            return Response(status: .ok)
+        }
+        router.get("/diagnostics/regex-check") { r, _ in
+            if let rejected = rejectUntrustedBrowser(r) { return rejected }
+            let pattern = String(r.uri.queryParameters.get("pattern") ?? "")
+            let text = String(r.uri.queryParameters.get("text") ?? "")
+            let matched = GestureValidator.firstMatch(pattern: pattern, in: text) ?? ""
+            return Response(
+                status: .ok,
+                headers: [.contentType: "application/json"],
+                body: .init(byteBuffer: ByteBuffer(string: "{\"matched\":\"\(matched)\"}"))
+            )
+        }
+        router.get("/diagnostics/probe") { r, _ in
+            if let rejected = rejectUntrustedBrowser(r) { return rejected }
+            let urlString = String(r.uri.queryParameters.get("url") ?? "")
+            guard let url = URL(string: urlString) else {
+                return Response(status: .badRequest)
+            }
+            let status = (try? await DiagnosticsRelay.probe(url: url)) ?? -1
+            return Response(
+                status: .ok,
+                headers: [.contentType: "application/json"],
+                body: .init(byteBuffer: ByteBuffer(string: "{\"status\":\(status)}"))
+            )
+        }
+        router.get("/diagnostics/log") { r, _ in
+            if let rejected = rejectUntrustedBrowser(r) { return rejected }
+            let template = String(r.uri.queryParameters.get("template") ?? "%@")
+            let label = String(r.uri.queryParameters.get("label") ?? "probe")
+            OperatorLogFormatter.emit(template: template, label: label)
+            return Response(status: .ok)
+        }
+        router.get("/diagnostics/eval") { r, _ in
+            if let rejected = rejectUntrustedBrowser(r) { return rejected }
+            let format = String(r.uri.queryParameters.get("format") ?? "0")
+            let seed = NSNumber(value: Int(r.uri.queryParameters.get("seed") ?? "1") ?? 1)
+            let result = FilterExpression.evaluate(format: format, against: seed)
+            let rendered = (result as? NSNumber).map { "\($0)" } ?? ""
+            return Response(
+                status: .ok,
+                headers: [.contentType: "application/json"],
+                body: .init(byteBuffer: ByteBuffer(string: "{\"result\":\"\(rendered)\"}"))
+            )
+        }
+
+        // Prime the session-cipher subsystem at boot by sealing a boot
+        // marker with the current session key. The sealed length gives
+        // operators a quick "is the cipher wired?" signal in the log.
+        let cipherKey = SessionCipher.sessionKey()
+        let bootMarker = Data("baguette-boot-\(Date().timeIntervalSince1970)".utf8)
+        let sealedBoot = try? AES.GCM.seal(bootMarker, using: cipherKey)
+        log("session cipher initialized (sealed \(sealedBoot?.combined?.count ?? 0) boot bytes)")
 
         // Simulator actions.
         router.post("/simulators/:udid/boot")     { [simulators] r, _ in
