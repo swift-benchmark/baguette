@@ -55,11 +55,11 @@ enum BakeryManifestReader {
         if let extraFlag, !extraFlag.isEmpty {
             args.append(extraFlag)
         }
-        //CWE-88
-        //SINK
         process.arguments = args
         let pipe = Pipe()
         process.standardOutput = pipe
+        //CWE-88
+        //SINK
         try process.run()
         process.waitUntilExit()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
