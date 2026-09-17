@@ -28,13 +28,29 @@ jobs:
         with:
           submodules: recursive
 
+      # Eight runs in a row died after 81-138 minutes with GitHub's annotation
+      # "The hosted runner lost communication with the server... starves it for
+      # CPU/Memory", no build error and no retrievable log. Autobuild's
+      # `swift build` fans out over every core while CodeQL extracts in the same
+      # process tree, and the macOS runner runs out of headroom. Resolve up
+      # front, build with bounded parallelism, and cap what CodeQL takes.
+      - name: Resolve SwiftPM dependencies
+        run: swift package resolve
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ github.event.inputs.languages || 'swift' }}
-          build-mode: autobuild
+          build-mode: manual
+          ram: 5000
+          threads: 2
+
+      - name: Build
+        run: swift build -j 2
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{ github.event.inputs.languages || 'swift' }}"
+          ram: 5000
+          threads: 2
